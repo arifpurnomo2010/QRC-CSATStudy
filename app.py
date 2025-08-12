@@ -1,4 +1,4 @@
-# app.py - FINAL VERSION (REVISED & STABLE)
+# app.py - FINAL VERSION (REVISED & STABLE - PRELOADED DATA)
 
 import base64
 import io
@@ -164,6 +164,37 @@ def calculate_derived_importance(df, mode, aspect_name=None):
 app = Dash(__name__, external_stylesheets=[dbc.themes.LUX], suppress_callback_exceptions=True)
 server = app.server
 
+# --- PERUBAHAN DIMULAI ---
+
+# 1. Muat dan proses data dari file "InterimData.xlsx" saat aplikasi dimulai
+try:
+    # Nama file yang akan dibaca secara otomatis
+    preload_filename = "InterimData.xlsx"
+    with open(preload_filename, "rb") as f:
+        excel_bytes = f.read()
+    
+    # Encode ke base64 untuk disimulasikan sebagai file upload
+    encoded_bytes = base64.b64encode(excel_bytes)
+    encoded_string = encoded_bytes.decode('utf-8')
+    
+    # Buat string konten lengkap yang formatnya sama dengan output dcc.Upload
+    initial_data_contents = f"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{encoded_string}"
+    
+    # Panggil fungsi process_data yang sudah ada untuk memproses data yang dimuat
+    print(f"Pre-loading and processing data from '{preload_filename}'...")
+    initial_processed_data = process_data(initial_data_contents, preload_filename)
+    print("Data loaded successfully.")
+
+except FileNotFoundError:
+    print(f"FATAL ERROR: 'InterimData.xlsx' not found. Please place it in the same directory as app.py.")
+    initial_processed_data = None
+except Exception as e:
+    print(f"An error occurred during data pre-loading: {e}")
+    initial_processed_data = None
+
+# --- PERUBAHAN SELESAI ---
+
+
 navbar = dbc.Navbar(
     dbc.Container(
         [
@@ -186,7 +217,11 @@ navbar = dbc.Navbar(
 )
 
 app.layout = html.Div([
-    dcc.Store(id='processed-data-store'),
+    # --- PERUBAHAN DIMULAI ---
+    # 2. Masukkan data yang sudah diproses ke dalam dcc.Store
+    dcc.Store(id='processed-data-store', data=initial_processed_data),
+    # --- PERUBAHAN SELESAI ---
+
     dcc.Download(id="download-performance-data-xlsx"),
     dcc.Download(id="download-kpi-data"),
     dcc.Download(id="download-attribute-data"),
@@ -195,12 +230,11 @@ app.layout = html.Div([
     navbar,
     dbc.Container([
         dbc.Row([
+            # --- PERUBAHAN DIMULAI ---
+            # 3. Hapus komponen dcc.Upload dan ganti dengan judul dan pilihan mode
             dbc.Col(
-                dcc.Upload(
-                    id='upload-data',
-                    children=html.Div(['Drag and Drop or ', html.A('Select an Excel File')]),
-                    style={'width': '100%', 'height': '60px', 'lineHeight': '60px', 'borderWidth': '1px', 'borderStyle': 'dashed', 'borderRadius': '5px', 'textAlign': 'center', 'margin': '10px 0'}
-                ), width=6
+                dbc.Card(dbc.CardBody(html.H4("Analysis Dashboard", className="text-center text-primary"))),
+                width=6
             ),
             dbc.Col(
                  dbc.Card(dbc.CardBody(dcc.RadioItems(
@@ -212,19 +246,17 @@ app.layout = html.Div([
                     value='company',
                 ))), width=6
             )
+            # --- PERUBAHAN SELESAI ---
         ], className="mt-4"),
         html.Hr(),
         dbc.Row([
-            # --- START: REVISED LAYOUT FOR SIDEBAR ---
             dbc.Col(
                 dbc.Card([
                     dbc.CardBody([
                         html.H4("Global Filters", className="card-title"),
                         html.Hr(),
-                        # This Div will be populated by the render_main_content callback
                         html.Div(id='dynamic-filters-placeholder'),
                         html.Br(),
-                        # Buttons are now static and disabled by default
                         html.Div([
                             dbc.Button("Download Company Data", id="btn-download-company", color="success", className="me-1 mt-2", disabled=True),
                             dbc.Button("Download App Data", id="btn-download-app", color="info", className="mt-2", disabled=True),
@@ -233,23 +265,29 @@ app.layout = html.Div([
                 ], style={'backgroundColor': '#f8f9fa'}),
                 width=3
             ),
-            # --- END: REVISED LAYOUT ---
             dbc.Col(id='tabs-container', width=9)
         ])
     ], fluid=True)
 ])
 
-# --- START: REVISED CALLBACK ---
+# --- PERUBAHAN DIMULAI ---
+# 4. Hapus callback `update_processed_data_store` karena tidak lagi dibutuhkan.
+#    Data sekarang dimuat saat aplikasi dimulai, bukan dari interaksi pengguna.
+# --- PERUBAHAN SELESAI ---
+
 @app.callback(
     Output('dynamic-filters-placeholder', 'children'),
     Output('tabs-container', 'children'),
     Input('processed-data-store', 'data')
 )
 def render_main_content(json_data):
+    # --- PERUBAHAN DIMULAI ---
     if json_data is None:
-        filter_content = html.P("Upload data to enable filters.", className="text-muted")
-        tabs = dbc.Card(dbc.CardBody(dbc.Alert("Please upload an Excel file to begin analysis.", color="info")))
+        # Pesan error jika file gagal dimuat
+        filter_content = html.P("Data could not be loaded. Check console for errors.", className="text-danger")
+        tabs = dbc.Card(dbc.CardBody(dbc.Alert("FATAL: Failed to load 'InterimData.xlsx'. The application cannot start.", color="danger")))
         return filter_content, tabs
+    # --- PERUBAHAN SELESAI ---
 
     filter_content = html.Div([
         html.P("1. Filter by Segment:", className="card-text"),
@@ -315,10 +353,7 @@ def render_main_content(json_data):
         ]),
     ])
     return filter_content, tabs
-# --- END: REVISED CALLBACK ---
 
-
-# --- START: NEW CALLBACK TO ENABLE BUTTONS ---
 @app.callback(
     Output('btn-download-company', 'disabled'),
     Output('btn-download-app', 'disabled'),
@@ -326,28 +361,13 @@ def render_main_content(json_data):
 )
 def toggle_download_buttons(json_data):
     if not json_data:
-        # If there is no data at all, both buttons are disabled
         return True, True
-
-    # Check if 'company' and 'app' data exist and are not empty in the data store
     company_data_exists = json_data.get('company') and not pd.read_json(io.StringIO(json_data['company']), orient='split').empty
     app_data_exists = json_data.get('app') and not pd.read_json(io.StringIO(json_data['app']), orient='split').empty
-
-    # The button is enabled (disabled=False) if its corresponding data exists
     return not company_data_exists, not app_data_exists
-# --- END: NEW CALLBACK ---
 
-
-@app.callback(
-    Output('processed-data-store', 'data'),
-    Input('upload-data', 'contents'),
-    State('upload-data', 'filename'),
-    prevent_initial_call=True
-)
-def update_processed_data_store(contents, filename):
-    if contents is None: return None
-    return process_data(contents, filename)
-
+# Sisa callback dari sini ke bawah tidak perlu diubah
+# ... (sisa kode dari file asli tidak berubah) ...
 @app.callback(
     Output('filter-segment', 'options'), Output('filter-region', 'options'), Output('filter-province', 'options'),
     Input('dynamic-filters-placeholder', 'children'), # Triggered when filters are added to the layout
